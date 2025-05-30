@@ -64,11 +64,15 @@ flowchart TD
    ```bash
    npm install
    ```
-2. **Run the development server:**
+2. **Add API key to .env file:**
+   ```bash
+   NEXT_PUBLIC_GEMINI_API_KEY=your_api_key_here
+   ```
+3. **Run the development server:**
    ```bash
    npm run dev
    ```
-3. **Open your browser:**
+4. **Open your browser:**
    Visit [http://localhost:3000](http://localhost:3000)
 
 ## Project Structure
