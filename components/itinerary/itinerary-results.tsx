@@ -19,11 +19,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ItineraryMap } from "@/components/itinerary/itinerary-map";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import Link from "next/link";
-import { generateMockItinerary } from "@/lib/mock-data";
 import { ItineraryType } from "@/lib/types";
 import { useToast } from "@/components/ui/use-toast";
 import { ItineraryDay } from "@/components/itinerary/itinerary-day";
 import { ItineraryLoading } from "@/components/itinerary/itinerary-loading";
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
+
+const API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+
+if (!API_KEY) {
+  console.error("Gemini API key is missing. Please set NEXT_PUBLIC_GEMINI_API_KEY in your .env file.");
+}
+
+const genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
 
 export function ItineraryResults({ query }: { query: string }) {
   const [itinerary, setItinerary] = useState<ItineraryType | null>(null);
@@ -31,32 +39,168 @@ export function ItineraryResults({ query }: { query: string }) {
   const [activeTab, setActiveTab] = useState("overview");
   const { toast } = useToast();
   
-  useEffect(() => {
-    // In a real implementation, we would call the OpenAI API here
-    // For the MVP, we'll use mock data
-    const fetchItinerary = async () => {
-      try {
-        setLoading(true);
-        // Simulate API call delay
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        const mockItinerary = generateMockItinerary(query);
-        setItinerary(mockItinerary);
-      } catch (error) {
-        console.error("Error generating itinerary:", error);
-        toast({
-          title: "Error generating itinerary",
-          description: "Please try again with a different query.",
-          variant: "destructive"
-        });
-      } finally {
-        setLoading(false);
+  // Move fetchItinerary outside of useEffect
+  const fetchItinerary = async (isRegenerate = false) => {
+    if (!genAI) {
+      toast({
+        title: "API Key Missing",
+        description: "Gemini API key is not configured. Please check your environment variables.",
+        variant: "destructive"
+      });
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const model = genAI.getGenerativeModel({
+        model: "gemini-1.5-flash-latest",
+        safetySettings: [
+          {
+            category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+            threshold: HarmBlockThreshold.BLOCK_NONE,
+          },
+          {
+            category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+            threshold: HarmBlockThreshold.BLOCK_NONE,
+          },
+          {
+            category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+            threshold: HarmBlockThreshold.BLOCK_NONE,
+          },
+          {
+            category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+            threshold: HarmBlockThreshold.BLOCK_NONE,
+          },
+        ],
+      });
+
+      const currentQuery = isRegenerate ? `${query} (regenerated)` : query;
+
+      const prompt = `
+        Generate a detailed travel itinerary based on the following query: "${currentQuery}"
+
+        The response MUST be a valid JSON object adhering to the following TypeScript type structure:
+
+        \`\`\`typescript
+        export type Activity = {
+          time: string; // e.g., "9:00 AM", "Afternoon"
+          title: string;
+          type: string; // e.g., "Dining", "Activity", "Sightseeing", "Free Time"
+          description: string;
+          location?: string;
+          duration?: string; // e.g., "2 hours", "All day"
+          coordinates?: [number, number]; // [latitude, longitude]
+        };
+
+        export type Day = {
+          title: string; // e.g., "Day 1: Arrival and City Exploration"
+          activities: Activity[];
+        };
+
+        export type Flight = {
+          airline: string;
+          departureTime: string;
+          arrivalTime: string;
+          duration: string;
+          stops: number;
+          price: string; // e.g., "$500 - $700 USD"
+        };
+
+        export type Hotel = {
+          name: string;
+          location: string;
+          price: string; // e.g., "$150 - $250 USD per night"
+          rating: number; // e.g., 4.5
+          image: string; // URL to an image (can be a placeholder if real image not available)
+        };
+
+        export type Restaurant = {
+          name: string;
+          cuisine: string;
+          location: string;
+          priceRange: string; // e.g., "$ - $$", "$$$ - $$$$"
+          rating: number;
+          image: string; // URL to an image
+          coordinates?: [number, number];
+        };
+
+        export type Attraction = {
+          name: string;
+          category: string; // e.g., "Museum", "Landmark", "Park"
+          location: string;
+          duration: string; // e.g., "1-2 hours"
+          price: string; // e.g., "Free", "$20 USD"
+          image: string; // URL to an image
+          coordinates?: [number, number];
+        };
+
+        export type ItineraryType = {
+          title: string; // e.g., "Barcelona Adventure: Architecture & Cuisine"
+          destination: string; // The main city/country
+          summary: string; // A short summary of the trip
+          pace: string; // e.g., "Relaxed", "Moderate", "Fast-paced"
+          tags: string[]; // e.g., ["Culture", "Foodie", "Adventure"]
+          days: Day[];
+          flights: Flight[]; // Provide 1-2 flight suggestions
+          hotels: Hotel[]; // Provide 1-2 hotel suggestions
+          restaurants: Restaurant[]; // Provide 3-5 restaurant suggestions
+          attractions: Attraction[]; // Provide 3-5 key attraction suggestions
+        };
+        \`\`\`
+
+        Important Notes:
+        - Ensure all string fields are populated. Use placeholder text like "Details to be confirmed" if specific information is not generated.
+        - For \`image\` fields, provide valid image URLs if possible. If not, use a placeholder like "https://via.placeholder.com/300x200.png?text=Image+Not+Available".
+        - For \`coordinates\`, provide actual latitude and longitude if easily available for locations; otherwise, omit the field or use [0,0] as a placeholder.
+        - Ensure the JSON is well-formed and complete according to the types.
+        - Provide a diverse set of activities, and try to make the itinerary engaging.
+        - Price fields should be strings and include currency if applicable (e.g., "$100 USD", "€50").
+        - Number of stops for flights should be a number.
+        - Ratings should be numbers (e.g., 4, 4.5).
+        - If the query is too vague or nonsensical, return a valid JSON with a title like "Query Unclear" and an appropriate summary, with empty arrays for other fields.
+      `;
+      
+      console.log(`Sending prompt to Gemini (${isRegenerate ? "regenerate" : "initial"}):`, currentQuery);
+      const result = await model.generateContent(prompt);
+      const response = result.response;
+      const text = response.text();
+      console.log("Gemini API response text:", text);
+
+      // Extract JSON from the response (it might be wrapped in markdown or have extra text)
+      let jsonString = text;
+      // Try to extract the first JSON object from the response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonString = jsonMatch[0];
       }
-    };
-    
+      
+      const generatedItinerary: ItineraryType = JSON.parse(jsonString);
+      setItinerary(generatedItinerary);
+
+    } catch (error) {
+      console.error(`Error generating itinerary with Gemini (${isRegenerate ? "regenerate" : "initial"}):`, error);
+      let errorMessage = "An unknown error occurred.";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      toast({
+        title: `Error ${isRegenerate ? "re" : ""}generating itinerary`,
+        description: `Failed to get data from AI: ${errorMessage}. Please try again or refine your query. Make sure your API key is valid and has permissions.`,
+        variant: "destructive",
+        duration: 10000, 
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     if (query) {
       fetchItinerary();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, toast]);
   
   if (loading || !itinerary) {
@@ -78,7 +222,13 @@ export function ItineraryResults({ query }: { query: string }) {
         </div>
         
         <div className="flex gap-2">
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" onClick={() => {
+            if (itinerary) {
+                setLoading(true);
+                setItinerary(null); // Clear current itinerary to show loading
+                fetchItinerary(true);
+            }
+          }}>
             <RefreshCw className="mr-2 h-4 w-4" />
             Regenerate
           </Button>
@@ -276,29 +426,34 @@ export function ItineraryResults({ query }: { query: string }) {
         <TabsContent value="attractions" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Activities & Attractions</CardTitle>
+              <CardTitle>Key Attractions & Activities</CardTitle>
               <CardDescription>
-                Things to do in {itinerary.destination}
+                Must-see sights and experiences in {itinerary.destination}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {itinerary.attractions.map((attraction, i) => (
-                  <div key={i} className="border rounded-lg overflow-hidden">
-                    <div 
-                      className="h-32 bg-cover bg-center" 
-                      style={{ backgroundImage: `url(${attraction.image})` }}
+                  <Card key={i}>
+                    <img 
+                      src={attraction.image || "https://via.placeholder.com/300x200.png?text=Attraction"} 
+                      alt={attraction.name} 
+                      className="w-full h-40 object-cover rounded-t-lg"
                     />
-                    <div className="p-4">
-                      <h3 className="font-medium">{attraction.name}</h3>
-                      <div className="text-sm text-muted-foreground mb-2">{attraction.category}</div>
-                      <div className="flex items-center justify-between mt-2">
-                        <div className="text-sm">{attraction.duration}</div>
-                        <div className="text-sm font-medium">{attraction.price}</div>
-                      </div>
-                    </div>
-                  </div>
+                    <CardHeader className="p-4">
+                      <CardTitle className="text-lg">{attraction.name}</CardTitle>
+                      <CardDescription>{attraction.category}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-0 text-sm">
+                      <p className="mb-1"><MapPin className="inline mr-1 h-3 w-3 text-muted-foreground" /> {attraction.location}</p>
+                      <p className="mb-1"><Clock className="inline mr-1 h-3 w-3 text-muted-foreground" /> {attraction.duration}</p>
+                      <p><Calendar className="inline mr-1 h-3 w-3 text-muted-foreground" /> {attraction.price}</p>
+                    </CardContent>
+                  </Card>
                 ))}
+                {itinerary.attractions.length === 0 && (
+                  <p className="text-muted-foreground col-span-full">No specific attractions recommended by AI. Try a more detailed query or broaden your search.</p>
+                )}
               </div>
             </CardContent>
           </Card>

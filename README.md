@@ -23,6 +23,28 @@ Voyageur is an AI-powered travel assistant that helps you plan your perfect trip
 2. **Generate Itinerary:** The app uses AI (mocked for MVP) to generate a personalized itinerary, including daily activities, dining, hotels, and flights.
 3. **Explore & Customize:** View your itinerary, explore it on an interactive map, and adjust as needed.
 
+## User Flow
+
+```mermaid
+flowchart TD
+    A[User visits homepage] --> B[User enters trip preferences]
+    B --> C[Submits form]
+    C --> D[Gemini API generates itinerary]
+    D --> E[Personalized itinerary displayed]
+    E --> F{User wants to customize?}
+    F -- Yes --> G[User edits or regenerates itinerary]
+    G --> D
+    F -- No --> H[User saves or uses itinerary]
+```
+
+## TODO
+- User login/sign up
+- Show itinerary on Google Maps
+- Fetch flight suggestions from Google Flights / Sky Scanner API
+- Fetch hotel suggestions from Booking.com or other hotels API
+- Fetch dining details from suggestion
+- Fetch activities details from tour agencies like Klook
+
 ## Example Queries
 - "Plan a 3-day trip to Barcelona with a focus on architecture and local cuisine"
 - "Weekend getaway to New York City on a moderate budget, interested in theater and art"
