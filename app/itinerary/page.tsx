@@ -1,15 +1,18 @@
+export const dynamic = "force-dynamic";
+
 import { Suspense } from "react";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { ItineraryResults } from "@/components/itinerary/itinerary-results";
 import { ItineraryLoading } from "@/components/itinerary/itinerary-loading";
 
-export default function ItineraryPage({
+export default async function ItineraryPage({
   searchParams,
 }: {
   searchParams: { q: string };
 }) {
-  const query = searchParams.q || "";
+  const { q } = await searchParams;
+  const query = q || "";
   
   return (
     <main className="min-h-screen flex flex-col">
